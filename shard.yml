@@ -1,0 +1,13 @@
+name: stomp
+version: 0.1.0
+
+authors:
+  - Pierre Rousselle <globoplox@gmail.com>
+
+targets:
+  stomp:
+    main: src/stomp.cr
+
+crystal: 0.32.1
+
+license: MIT
