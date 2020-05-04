@@ -39,6 +39,10 @@ module Stomp
     def self.escape_header(src)
       src.gsub(/(\r|\n|:|\\)/, {"\r": "\\r", "\n": "\\n", ":": "\\c", "\\": "\\\\"})
     end
+
+    def encode(with_return = false, with_content_length = true)
+      encode(IO::Memory.new, with_return, with_content_length).rewind.gets_to_end
+    end
     
     def encode(output : IO, with_return = false, with_content_length = true): IO
       @headers["content-length"] = body.size.to_s if with_content_length 
@@ -63,6 +67,10 @@ module Stomp
 
     def self.decode(io : IO): Frame
       Decoder.new(io).decode.check.frame
+    end
+
+    def self.decode(s : String): Frame
+      Decoder.new(IO::Memory.new s).decode.check.frame
     end
 
     private class Decoder
@@ -180,20 +188,29 @@ module Stomp
             end
           when :body
             case char
-            when '\0' then @state = :body_or_eof
+            when '\0' then @state = :body_or_null
             else @body += char
             end
-          when :body_or_eof
-            @body += '\0'
+          when :body_or_null
             case char
-            when '\0' then @state = :body_or_eof
+            when '\n' then @state = :body_or_eof
+            else
+              @body += '\0'              
+              @body += char
+              @state = :body
+            end
+          when :body_or_eof
+            case char
+            when '\0' then
+              @body += "\0\n"
+              @state = :body_or_null
             else @body += char; @state = :body
             end
           else raise "Unexpected decoder state: #{@state}."
           end
           @index += 1
         end
-        raise "Unexpected end of file: expected body or EOF character." if @state != :body_or_eof
+        raise "Unexpected end of file: expected body or EOF sequence '\\0\\n'. State at end of input is '#{@state}'" if @state != :body_or_eof && @state != :body_or_null
         self
       end
     end    
