@@ -1,8 +1,8 @@
-# TODO: Write documentation for `Stomp`
+# STAMP is a small text push/sub protocol.
+# This lib intend to provide utilities to sustains my need for its and that's all.
+# It support STOMP 1.2 and that's all.
 module Stomp
   VERSION = "0.1.0"
-
-  # TODO: Put your code here
 
   enum Commands
     CONNECT
@@ -21,7 +21,9 @@ module Stomp
     ERROR
   end
 
+  # Represent a frame 
   class Frame
+    NOT_ESCAPED_FRAMES = [Commands::CONNECT, Commands::CONNECTED]
     property command : Commands
     property headers : Hash(String, String)
     property body : String
@@ -32,19 +34,25 @@ module Stomp
 
     def initialize(@command, @headers = {} of String => String, @body = "")
     end
-
+    
+    # TODO
     def self.escape_header(src)
+      src.gsub(/(\r|\n|:|\\)/, {"\r": "\\r", "\n": "\\n", ":": "\\c", "\\": "\\\\"})
     end
     
     def encode(output : IO, with_return = false, with_content_length = true): IO
-      @headers["content-length"] = body.length if with_content_length 
+      @headers["content-length"] = body.size.to_s if with_content_length 
       eol = with_return ? "\r\n" : "\n"
-      output << @commend.to_s
+      output << @command.to_s
       output << eol
       @headers.each do |name, value|
         output << name
         output << ':'
-        output << Frame.escape_heaer value
+        if NOT_ESCAPED_FRAMES.includes? @command
+          output << value
+        else
+          output << Frame.escape_header value
+        end
         output << eol
       end
       output << eol
@@ -66,6 +74,7 @@ module Stomp
       @body = ""
       @headers = {} of String => String
       @index = 0
+      @must_escape_header = true
       
       def initialize(@src : IO) end
 
@@ -73,7 +82,7 @@ module Stomp
         getter byte
         getter state
         def initialize(@char : Char, @state : Symbol, @index : Int32)
-          super "Unexpected byte #{@char.bytes} during parsing of #{@state} at position #{@index}"
+          super "Unexpected byte #{@char.bytes} '#{@char}' during parsing of #{@state} at position #{@index}"
         end
       end
 
@@ -83,8 +92,7 @@ module Stomp
 
       def begin_header_or_body
         @state = :header_or_body
-        @header = ""
-        @value = ""
+        @must_escape_header = !(Frame::NOT_ESCAPED_FRAMES.map &.to_s).includes? @command
       end
 
       def header_name(char)
@@ -95,25 +103,27 @@ module Stomp
       def end_header(next_state)
         @state = next_state
         # When a header is repeated, only first value must be kept.
-        @headers[@header] = unescape_header @value unless @headers.has_key? @header
+        @headers[@header] = @value unless @headers.has_key? @header
+        @header = ""
+        @value = ""
       end
 
       def check
         if @body.includes? '\0'
           raise "Missing 'content-length' header. Body contain \\0, therefore it must include a 'content-length' header." unless @headers.has_key? "content-length"  
-          raise "Header 'content-length' value is incorrect: found #{@headers["content-length"]}, expected #{@body.size}." unless @headers["content-length"] != @body.size.to_s
+          raise "Header 'content-length' value is incorrect: found #{@headers["content-length"]}, expected #{@body.size}." if @headers["content-length"] != @body.size.to_s
         end
         self
       end
-
-      # TODO
-      def unescape_header(src)
-        src
-      end
       
-      def frame
-        Frame.new Commands.parse(@command), @headers, @body
+      def continue_header(char)
+        @value += char
+        @state = :header_value
       end
+
+       def frame
+         Frame.new Commands.parse(@command), @headers, @body
+       end
       
       def decode : Decoder
         @src.each_char do |char|
@@ -154,11 +164,20 @@ module Stomp
             end  
           when :header_value
             case
+            when char == '\\' && @must_escape_header then @state = :header_value_escape
             when !char.control? then @value += char
             when char == '\r' then end_header :eol_then_header_or_body
             when char == '\n' then end_header :header_or_body
             else error char
-            end  
+            end
+          when :header_value_escape
+            case char
+            when 'r' then continue_header '\r'
+            when 'n' then continue_header '\n'
+            when 'c' then continue_header ':'
+            when '\\' then continue_header '\\'
+            else error char
+            end
           when :body
             case char
             when '\0' then @state = :body_or_eof
@@ -168,7 +187,7 @@ module Stomp
             @body += '\0'
             case char
             when '\0' then @state = :body_or_eof
-            else @body += char; @state = :body_or_eof
+            else @body += char; @state = :body
             end
           else raise "Unexpected decoder state: #{@state}."
           end
