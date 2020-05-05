@@ -23,6 +23,13 @@ module Stomp
 
   # Represent a frame 
   class Frame
+
+    BEAT = "\n"
+    
+    def self.is_beat(src)
+      src == "\n" || src == "\r\n"
+    end
+    
     NOT_ESCAPED_FRAMES = [Commands::CONNECT, Commands::CONNECTED]
     property command : Commands
     property headers : Hash(String, String)
@@ -40,7 +47,7 @@ module Stomp
       src.gsub(/(\r|\n|:|\\)/, {"\r": "\\r", "\n": "\\n", ":": "\\c", "\\": "\\\\"})
     end
 
-    def encode(with_return = false, with_content_length = true)
+    def encode(with_return = false, with_content_length = true): String
       encode(IO::Memory.new, with_return, with_content_length).rewind.gets_to_end
     end
     

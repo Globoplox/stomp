@@ -1,24 +1,10 @@
 require "./spec_helper"
 include Stomp
 
-def not_escaped_header
-end
-
-def escaped_header
-end
-
-
-def simple_send_frame
-end
-
-def complex_send_frame
-end
-
-
 def test_codec_equivalence(encoded, expected)
-    decoded = Frame.decode IO::Memory.new encoded
+    decoded = Frame.decode encoded
     decoded.should eq expected
-    reencoded = decoded.encode(IO::Memory.new, with_content_length: false).rewind.gets_to_end
+    reencoded = decoded.encode with_content_length: false
     reencoded.should eq encoded
 end
 
