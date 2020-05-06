@@ -9,9 +9,9 @@ module Stomp
     SEND
     SUBSCRIBE
     UNSUBSCRIBE
-    BEGIN
-    COMMIT
-    ABORT
+    #BEGIN
+    #COMMIT
+    #ABORT
     ACK
     NACK
     DISCONNECT
