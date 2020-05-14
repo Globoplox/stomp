@@ -3,8 +3,9 @@ require "uuid"
 require "./stomp"
 require "./frames"
 
-# todo make it works with socket and not just websockets
-# todo support transaction ?????
+# Todo make it works with socket and not just websockets
+# Todo support transaction ?
+# Todo support receipt ?
 class Stomp::Client < HTTP::WebSocket
 
   module Ack
@@ -67,6 +68,17 @@ class Stomp::Client < HTTP::WebSocket
       end
     end
   end
+
+  protected def ack(id)
+    send_frame Frame.new Commands::ACK, {"id" => id}
+  end
+
+  protected def nack(id)
+    send_frame Frame.new Commands::NACK, {"id" => id}
+  end
+
+  class Nack < Exception
+  end
   
   protected def handle_frame(frame)
     case {@state, frame.command}
@@ -74,9 +86,16 @@ class Stomp::Client < HTTP::WebSocket
       @on_error.try &.call frame
       close 400, frame.body
     when {_, Commands::MESSAGE}
-      # ack/nack/receipt ?
-      # here we ignore unexpected message, maybe we want to apply default handler, or auto nack if necessary ? 
-      @subscriptions[UUID.new frame.headers["subscription"]]?.try &.callback.try &.call frame
+      sub = @subscriptions[UUID.new frame.headers["subscription"]]?
+      unless sub.nil?
+        begin
+          sub.callback.try &.call frame
+        rescue ex : Nack 
+          frame.headers["ack"]?.try { |id| nack id }
+        else
+          frame.headers["ack"]?.try { |id| ack id }
+        end
+      end
     when {_, Commands::ERROR}
       @on_error.try &.call frame
     when {:disconnected, Commands::CONNECTED}
@@ -181,7 +200,7 @@ cli.on_close do |msg|
 end
 cli.on_connected do
   puts "Oh I'm connected, yummy !"
-  sub = cli.subscribe "/queue/foo" do |frame|
+  sub = cli.subscribe "/queue/foo", Stomp::Client::Ack::INDIVIDUAL do |frame|
     puts "I got a message: '#{frame.body}'"
   end
   sleep 2.seconds
